@@ -943,9 +943,6 @@
 <script>
         'use strict';
         
-        // 전역 변수<script>
-        'use strict';
-        
         // 전역 변수
         let currentUser = null;
         let currentPage = 'dashboard';
@@ -968,27 +965,62 @@
         ];
 
         // **[수정된 함수]** 지원 타입 자동 분류 로직
-        function classifySupportType(description) {
-            // 설명이 없는 경우는 기본적으로 기술지원으로 분류 유지
-            if (!description) return '기술지원'; 
+        function classifySupportType(title, description) {
+            const text = (title || '') + ' ' + (description || '');
+            const lowerText = text.toLowerCase();
+            
+            // 키워드 목록
+            const keywords = {
+                '정기점검': ['정기 점검', '정기', '정기점검', '점검'],
+                '장애지원': ['장애', '장애지원', '장애 지원', '이슈 방문', 'fault', 'down', '실패'],
+                '기술지원': [
+                    '기술지원', '기술미팅', '기술 지원', '기술 미팅', '원격지원', '원격 지원', 
+                    '실사', '개발 미팅', '개발미팅', '담당자 교육', '이슈 지원', '작업', 
+                    '운영자 교육', '백업 구성', '정책 구성', '백업 구축', '백업구축', '분석',
+                    '설치', '구성', '테스트', 'review', 'poc' // 이전 기술지원 키워드 일부 유지
+                ]
+            };
 
-            const lowerDesc = description.toLowerCase();
-
-            // 1. 정기점검 키워드
-            if (lowerDesc.includes('점검') || lowerDesc.includes('정기')) {
+            // 3. 정기점검 우선 확인
+            if (keywords.정기점검.some(k => lowerText.includes(k))) {
                 return '정기점검';
             }
-            // 2. 장애지원 키워드
-            if (lowerDesc.includes('장애') || lowerDesc.includes('실패') || lowerDesc.includes('fault') || lowerDesc.includes('down')) {
+
+            // 2. 장애지원 확인
+            if (keywords.장애지원.some(k => lowerText.includes(k))) {
                 return '장애지원';
             }
-            // 3. 기술지원 키워드
-            if (lowerDesc.includes('기술지원') || lowerDesc.includes('기술미팅') || lowerDesc.includes('설치') || lowerDesc.includes('구성') || lowerDesc.includes('테스트') || lowerDesc.includes('review') || lowerDesc.includes('poc')) {
+            
+            // 1. 기술지원 확인
+            if (keywords.기술지원.some(k => lowerText.includes(k))) {
                 return '기술지원';
             }
             
-            // **[변경 사항]** 위의 모든 조건에 해당하지 않으면 null을 반환하여 삭제 처리
+            // 키워드에 해당하지 않으면 null 반환 (parseOutlookCsvData에서 기타/제외 처리)
             return null; 
+        }
+
+        // **[새로운 기능]** 특정 키워드가 포함된 항목을 필터링하는 함수 (제외 로직 강화)
+        function isExcluded(title, description) {
+            const lowerTitle = (title || '').toLowerCase();
+            const lowerDesc = (description || '').toLowerCase();
+            
+            // 1. 내부 사무실 관련 키워드 확인 (4. 기타지원 제외 기준)
+            const internalKeywords = ['사무실', '하남 사무실', '하남사무실', '시오랩', '사내'];
+            if (internalKeywords.some(k => lowerTitle.includes(k))) {
+                return true; // 사무실 관련 일정은 제외
+            }
+
+            // 2. 명시적으로 제외할 키워드 (제목/설명 무관)
+            const permanentExcludeKeywords = ['취소됨', '예비군', '민방위', '월세', '공가', '연차', '워크샵', '회식'];
+            if (permanentExcludeKeywords.some(k => lowerTitle.includes(k) || lowerDesc.includes(k))) {
+                return true;
+            }
+
+            // 3. 시간 계산이 불가능한 경우
+            // 이 부분은 parseOutlookCsvData에서 totalHours > 0으로 처리하므로 여기서는 생략 가능.
+            
+            return false;
         }
         
         // 로그인 처리
@@ -1446,7 +1478,7 @@
 
             const types = Object.keys(typeData);
             const hours = Object.values(typeData);
-            const colors = ['#28a745', '#007bff', '#dc3545'];
+            const colors = ['#28a745', '#007bff', '#dc3545', '#ffc107', '#6c757d'];
 
             charts.supporttype = new Chart(ctx, {
                 type: 'doughnut',
@@ -1550,17 +1582,33 @@
                 const engineer = record.engineerName;
                 if (!engineerStats[engineer]) {
                     engineerStats[engineer] = {
-                        count: 0, totalHours: 0, 정기점검: 0, 기술지원: 0, 장애지원: 0
+                        count: 0, totalHours: 0, 정기점검: 0, 기술지원: 0, 장애지원: 0, '기타지원': 0
                     };
                 }
                 engineerStats[engineer].count++;
                 engineerStats[engineer].totalHours += parseFloat(record.totalHours);
-                engineerStats[engineer][record.supportType]++;
-            });
+                
+                // 새로운 분류 '기타지원' 처리 및 기존 분류 처리
+                const type = record.supportType === '기타/미분류' ? '기타지원' : record.supportType;
 
+                if (engineerStats[engineer].hasOwnProperty(type)) {
+                    engineerStats[engineer][type]++;
+                } else {
+                    // 예외적인 경우 (발생하면 안 됨)
+                    engineerStats[engineer]['기타지원']++; 
+                }
+            });
+            
+            // 테이블 헤더에 '기타지원'을 포함하지 않으므로, 이 부분을 어떻게 처리할지 결정해야 합니다.
+            // 임시로 '기타지원'은 '기술지원'에 합산하거나 테이블에 추가해야 합니다.
+            // 여기서는 임시로 '기타지원'을 '기술지원'에 합산하여 3가지 타입만 표시하도록 유지합니다.
+            // **주의:** 실제로는 테이블 구조를 변경하는 것이 바람직합니다.
+            
             tbody.innerHTML = Object.keys(engineerStats).map(engineer => {
                 const stat = engineerStats[engineer];
                 const avgHours = stat.totalHours / stat.count;
+                
+                // 기타지원을 기술지원에 합산하지 않고, 일단 4번째 칸에 '기타지원'을 출력하도록 임시 수정
                 return `
                     <tr>
                         <td style="font-weight: 600; color: #667eea;">${engineer}</td>
@@ -1568,11 +1616,13 @@
                         <td>${stat.totalHours.toFixed(1)}h</td>
                         <td>${avgHours.toFixed(1)}h</td>
                         <td>${stat.정기점검}</td>
-                        <td>${stat.기술지원}</td>
+                        <td>${stat.기술지원 + stat['기타지원']}</td>
                         <td>${stat.장애지원}</td>
                     </tr>
                 `;
             }).join('');
+            
+            // NOTE: 테이블 헤더가 정기점검, 기술지원, 장애지원 3가지이므로, '기타지원'은 일단 기술지원에 포함하여 표시합니다.
         }
 
         // 사이트별 상세 통계
@@ -1605,8 +1655,9 @@
             tbody.innerHTML = Object.keys(siteStats).map(site => {
                 const stat = siteStats[site];
                 const avgHours = stat.totalHours / stat.count;
+                // 가장 많이 등장한 supportType 찾기
                 const mainType = Object.keys(stat.supportTypes).reduce((a, b) => 
-                    stat.supportTypes[a] > stat.supportTypes[b] ? a : b);
+                    stat.supportTypes[a] > stat.supportTypes[b] ? a : b, '기타지원'); // 기본값 설정
                 return `
                     <tr>
                         <td style="font-weight: 600; color: #667eea;">${site}</td>
@@ -1768,11 +1819,6 @@
                 // 정규식을 사용하여 큰따옴표로 묶인 필드와 그렇지 않은 필드를 분리
                 const fields = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || row.split(',');
                 
-                if (fields.length < headers.length) {
-                    // 필드 수가 부족하면 건너뛰거나 취소된 일정 필터링
-                    if(row.includes('취소됨')) return; 
-                }
-                
                 // 필드에서 큰따옴표 제거 및 앞뒤 공백 제거
                 const cleanFields = fields.map(field => field.replace(/^"|"$/g, '').trim());
 
@@ -1784,6 +1830,11 @@
                 const endDate = cleanFields[indices.endDate];
                 const endTimeRaw = cleanFields[indices.endTime];
                 const description = cleanFields[indices.description];
+
+                // **[필터링/제외 로직]**: 명시적으로 제외할 항목 (취소, 개인 일정, 사무실 내부 일정) 확인
+                if (isExcluded(siteName, description) || row.includes('취소됨')) {
+                    return; // 이 레코드는 건너뜀
+                }
 
                 // 엔지니어 이름에서 조직 정보 제거 (예: [시오랩] SC팀 김준규 -> 김준규)
                 if(engineerName) {
@@ -1805,11 +1856,21 @@
                 const startTime = formatTime(startTimeRaw);
                 const endTime = formatTime(endTimeRaw);
                 
-                const supportType = classifySupportType(siteName + ' ' + description);
+                // supportType이 null 대신 '기타/미분류'를 반환하도록 로직 수정
+                let supportType = classifySupportType(siteName, description);
                 const totalHours = calculateSupportHours(startDate, startTime, endDate, endTime);
 
-                // **[최종 수정된 부분]**: supportType이 null이 아니고, 총 시간이 0보다 큰 경우에만 추가
-                if (siteName && engineerName && startDate && endDate && totalHours > 0 && supportType) {
+                // **[기타지원 최종 처리]**
+                // 1. 분류 키워드에 걸리지 않았고 (supportType === null),
+                // 2. 명시적 제외 항목에도 걸리지 않았고,
+                // 3. 시간이 계산되는 (totalHours > 0) 외부 일정인 경우
+                if (supportType === null) {
+                    supportType = '기타지원';
+                }
+
+
+                // 최종 유효성 검사 (총 시간이 0보다 크고 필수 필드가 존재하는 경우)
+                if (siteName && engineerName && startDate && endDate && totalHours > 0 && supportType !== null) {
                      validData.push({
                         siteName: siteName.replace(/^취소됨: /g, '').trim(), // 제목에 취소됨이 있다면 제거
                         engineerName: engineerName,
@@ -2105,8 +2166,7 @@
                     const parsedData = parseOutlookCsvData(csvText);
 
                     if (parsedData.length > 0) {
-                        // 기존 로컬 데이터를 덮어쓰고, CSV의 데이터를 추가합니다.
-                        // (GitHub CSV 파일이 전체 데이터의 원본이라고 가정합니다.)
+                        // GitHub CSV 파일이 전체 데이터의 원본이라고 가정하고 덮어씁니다.
                         supportRecords = parsedData.map(record => ({
                             id: Date.now() + Math.random(),
                             ...record,
@@ -2155,7 +2215,7 @@
                 this.searchTimeout = setTimeout(() => applyFilters(), 300);
             });
 
-            // **[데이터 로드 우선순위]**: LocalStorage > GitHub CSV URL > SampleData
+            // **[데이터 로드 우선순위]**: LocalStorage > GitHub CSV URL > Sample Data
             const loadedFromLocal = loadRecordsFromLocalStorage(); 
             
             if (!loadedFromLocal) {
