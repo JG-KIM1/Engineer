@@ -943,1175 +943,7 @@
 <script>
         'use strict';
         
-        // 전역 변수
-        let currentUser = null;
-        let currentPage = 'dashboard';
-        let supportRecords = [];
-        let filteredRecords = [];
-        let editingRecord = null;
-        let charts = {};
-        let currentChartTab = 'monthly';
-        let currentStatsTab = 'engineer';
-        let currentRegisterTab = 'manual';
-
-        // 사용자 데이터
-        const users = [
-            { username: 'admin', password: 'admin123', name: '관리자' },
-            { username: 'engineer1', password: 'eng123', name: '엔지니어1' }
-        ];
-
-        // 지원 타입 자동 분류 로직
-        function classifySupportType(description) {
-            if (!description) return '기술지원'; // 설명이 없는 경우 기본값
-
-            const lowerDesc = description.toLowerCase();
-
-            // 1. 정기점검 키워드
-            if (lowerDesc.includes('점검') || lowerDesc.includes('정기')) {
-                return '정기점검';
-            }
-            // 2. 장애지원 키워드
-            if (lowerDesc.includes('장애') || lowerDesc.includes('실패') || lowerDesc.includes('fault') || lowerDesc.includes('down')) {
-                return '장애지원';
-            }
-            // 3. 기술지원 키워드 (남은 대부분의 경우)
-            if (lowerDesc.includes('기술지원') || lowerDesc.includes('기술미팅') || lowerDesc.includes('설치') || lowerDesc.includes('구성') || lowerDesc.includes('테스트') || lowerDesc.includes('review') || lowerDesc.includes('poc')) {
-                return '기술지원';
-            }
-            
-            return '기술지원'; // 위의 조건에 모두 해당하지 않으면 기술지원으로 분류
-        }
-        
-        // 로그인 처리
-        function handleLogin() {
-            const username = document.getElementById('username').value;
-            const password = document.getElementById('password').value;
-            const errorElement = document.getElementById('loginError');
-
-            const user = users.find(u => u.username === username && u.password === password);
-            
-            if (user) {
-                currentUser = user;
-                document.getElementById('loginPage').classList.add('hidden');
-                document.getElementById('mainApp').classList.remove('hidden');
-                document.getElementById('userWelcome').textContent = `${user.name}님 환영합니다`;
-                showPage('dashboard');
-                errorElement.classList.add('hidden');
-            } else {
-                errorElement.textContent = '잘못된 사용자명 또는 비밀번호입니다.';
-                errorElement.classList.remove('hidden');
-            }
-        }
-
-        // 로그아웃 처리
-        function handleLogout() {
-            currentUser = null;
-            document.getElementById('mainApp').classList.add('hidden');
-            document.getElementById('loginPage').classList.remove('hidden');
-            document.getElementById('username').value = '';
-            document.getElementById('password').value = '';
-        }
-
-        // 페이지 전환
-        function showPage(page) {
-            ['dashboardPage', 'registerPage', 'listPage'].forEach(p => {
-                document.getElementById(p).classList.add('hidden');
-            });
-
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('active');
-            });
-
-            document.getElementById(page + 'Page').classList.remove('hidden');
-            if (event && event.target) {
-                event.target.classList.add('active');
-            }
-
-            currentPage = page;
-
-            if (page === 'dashboard') {
-                updateFilterOptions();
-                applyFilters();
-            } else if (page === 'list') {
-                updateRecordsList();
-            }
-        }
-
-        // 차트 탭 전환
-        function showChartTab(tabName) {
-            document.querySelectorAll('.chart-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.chart-tab-content').forEach(content => {
-                content.classList.add('hidden');
-            });
-
-            event.target.classList.add('active');
-            document.getElementById(tabName + 'ChartContainer').classList.remove('hidden');
-            
-            currentChartTab = tabName;
-            updateSpecificChart(tabName);
-        }
-
-        // 통계 탭 전환
-        function showStatsTab(tabName) {
-            document.querySelectorAll('.stats-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.stats-tab-content').forEach(content => {
-                content.classList.add('hidden');
-            });
-
-            event.target.classList.add('active');
-            document.getElementById(tabName + 'StatsContainer').classList.remove('hidden');
-            
-            currentStatsTab = tabName;
-            updateDetailStats();
-        }
-
-        // 등록 탭 전환
-        function showRegisterTab(tabName) {
-            document.querySelectorAll('.register-tab').forEach(tab => {
-                tab.classList.remove('active');
-            });
-            document.querySelectorAll('.register-tab-content').forEach(content => {
-                content.classList.add('hidden');
-            });
-
-            event.target.classList.add('active');
-            document.getElementById(tabName + 'RegisterContent').classList.remove('hidden');
-            
-            currentRegisterTab = tabName;
-        }
-
-        // 필터 옵션 업데이트
-        function updateFilterOptions() {
-            const engineers = [...new Set(supportRecords.map(r => r.engineerName))].sort();
-            const sites = [...new Set(supportRecords.map(r => r.siteName))].sort();
-            
-            const engineerSelect = document.getElementById('filterEngineer');
-            const siteSelect = document.getElementById('filterSite');
-
-            engineerSelect.innerHTML = '<option value="">전체 엔지니어</option>';
-            engineers.forEach(engineer => {
-                engineerSelect.innerHTML += `<option value="${engineer}">${engineer}</option>`;
-            });
-
-            siteSelect.innerHTML = '<option value="">전체 사이트</option>';
-            sites.forEach(site => {
-                siteSelect.innerHTML += `<option value="${site}">${site}</option>`;
-            });
-        }
-
-        // 필터 적용
-        function applyFilters() {
-            const keyword = document.getElementById('searchKeyword').value.toLowerCase();
-            const engineerFilter = document.getElementById('filterEngineer').value;
-            const siteFilter = document.getElementById('filterSite').value;
-            const supportTypeFilter = document.getElementById('filterSupportType').value;
-            const startDateFilter = document.getElementById('filterStartDate').value;
-            const endDateFilter = document.getElementById('filterEndDate').value;
-
-            filteredRecords = supportRecords.filter(record => {
-                if (keyword && !record.siteName.toLowerCase().includes(keyword) && 
-                    !record.engineerName.toLowerCase().includes(keyword)) {
-                    return false;
-                }
-                if (engineerFilter && record.engineerName !== engineerFilter) return false;
-                if (siteFilter && record.siteName !== siteFilter) return false;
-                if (supportTypeFilter && record.supportType !== supportTypeFilter) return false;
-                if (startDateFilter && record.startDate < startDateFilter) return false;
-                if (endDateFilter && record.startDate > endDateFilter) return false;
-                return true;
-            });
-
-            updateDashboard();
-        }
-
-        // 필터 초기화
-        function clearFilters() {
-            ['searchKeyword', 'filterEngineer', 'filterSite', 'filterSupportType', 'filterStartDate', 'filterEndDate'].forEach(id => {
-                document.getElementById(id).value = '';
-            });
-            applyFilters();
-        }
-
-        // 시간 계산
-        function calculateSupportHours(startDate, startTime, endDate, endTime) {
-            if (!startDate || !startTime || !endDate || !endTime) return 0;
-            
-            const start = new Date(`${startDate}T${startTime}`);
-            const end = new Date(`${endDate}T${endTime}`);
-            const diffInMs = end - start;
-            const diffInHours = diffInMs / (1000 * 60 * 60);
-            
-            return Math.max(0, diffInHours);
-        }
-
-        // 실시간 시간 계산 업데이트
-        function updateCalculatedHours() {
-            const startDate = document.getElementById('startDate').value;
-            const startTime = document.getElementById('startTime').value;
-            const endDate = document.getElementById('endDate').value;
-            const endTime = document.getElementById('endTime').value;
-
-            const hours = calculateSupportHours(startDate, startTime, endDate, endTime);
-            document.getElementById('calculatedHours').textContent = hours.toFixed(1);
-        }
-
-        // 지원 기록 제출
-        function handleSubmitSupport() {
-            const siteName = document.getElementById('siteName').value;
-            const engineerName = document.getElementById('engineerName').value;
-            const supportType = document.getElementById('supportType').value;
-            const startDate = document.getElementById('startDate').value;
-            const startTime = document.getElementById('startTime').value;
-            const endDate = document.getElementById('endDate').value;
-            const endTime = document.getElementById('endTime').value;
-
-            if (!siteName || !engineerName || !supportType || !startDate || !startTime || !endDate || !endTime) {
-                alert('모든 필드를 입력해주세요.');
-                return;
-            }
-
-            const totalHours = calculateSupportHours(startDate, startTime, endDate, endTime);
-
-            const record = {
-                id: editingRecord ? editingRecord.id : Date.now(),
-                siteName,
-                engineerName,
-                supportType,
-                startDate,
-                startTime,
-                endDate,
-                endTime,
-                totalHours: totalHours.toFixed(1),
-                createdAt: editingRecord ? editingRecord.createdAt : new Date().toISOString()
-            };
-
-            if (editingRecord) {
-                const index = supportRecords.findIndex(r => r.id === record.id);
-                supportRecords[index] = record;
-            } else {
-                supportRecords.push(record);
-            }
-
-            clearForm();
-            alert(editingRecord ? '기록이 수정되었습니다.' : '기록이 등록되었습니다.');
-            showPage('list');
-        }
-
-        // 폼 초기화
-        function clearForm() {
-            ['siteName', 'engineerName', 'supportType', 'startDate', 'startTime', 'endDate', 'endTime'].forEach(id => {
-                document.getElementById(id).value = '';
-            });
-            document.getElementById('calculatedHours').textContent = '0';
-            
-            editingRecord = null;
-            document.getElementById('registerTitle').textContent = '➕ 사이트 지원 등록';
-            document.getElementById('submitBtn').textContent = '등록';
-            document.getElementById('cancelBtn').classList.add('hidden');
-        }
-
-        // 기록 편집
-        function editRecord(id) {
-            const record = supportRecords.find(r => r.id === id);
-            if (!record) return;
-
-            editingRecord = record;
-            ['siteName', 'engineerName', 'supportType', 'startDate', 'startTime', 'endDate', 'endTime'].forEach(field => {
-                document.getElementById(field).value = record[field];
-            });
-            
-            updateCalculatedHours();
-            
-            document.getElementById('registerTitle').textContent = '✏️ 지원 기록 수정';
-            document.getElementById('submitBtn').textContent = '수정';
-            document.getElementById('cancelBtn').classList.remove('hidden');
-            
-            showPage('register');
-        }
-
-        // 편집 취소
-        function handleCancelEdit() {
-            clearForm();
-        }
-
-        // 기록 삭제
-        function deleteRecord(id) {
-            if (confirm('정말로 이 기록을 삭제하시겠습니까?')) {
-                supportRecords = supportRecords.filter(r => r.id !== id);
-                updateRecordsList();
-                if (currentPage === 'dashboard') {
-                    applyFilters();
-                }
-                alert('기록이 삭제되었습니다.');
-            }
-        }
-
-        // 기록 목록 업데이트
-        function updateRecordsList() {
-            const tbody = document.getElementById('recordsTableBody');
-            const emptyState = document.getElementById('emptyState');
-
-            if (supportRecords.length === 0) {
-                tbody.innerHTML = '';
-                emptyState.classList.remove('hidden');
-                return;
-            }
-
-            emptyState.classList.add('hidden');
-            tbody.innerHTML = supportRecords.map(record => `
-                <tr>
-                    <td>${record.siteName}</td>
-                    <td>${record.engineerName}</td>
-                    <td><span class="support-type-badge ${record.supportType}">${record.supportType}</span></td>
-                    <td>${record.startDate} ${record.startTime}</td>
-                    <td>${record.endDate} ${record.endTime}</td>
-                    <td>${record.totalHours}h</td>
-                    <td>
-                        <button class="action-btn" onclick="editRecord(${record.id})" title="수정">✏️</button>
-                        <button class="action-btn delete" onclick="deleteRecord(${record.id})" title="삭제">🗑️</button>
-                    </td>
-                </tr>
-            `).join('');
-        }
-
-        // 대시보드 업데이트
-        function updateDashboard() {
-            updateStats();
-            updateCharts();
-            updateDetailStats();
-        }
-
-        // 통계 업데이트
-        function updateStats() {
-            const records = filteredRecords;
-            const totalRecords = records.length;
-            const totalHours = records.reduce((sum, record) => sum + parseFloat(record.totalHours), 0);
-            const avgHours = totalRecords > 0 ? totalHours / totalRecords : 0;
-            const activeEngineers = [...new Set(records.map(r => r.engineerName))].length;
-
-            document.getElementById('totalRecords').textContent = totalRecords;
-            document.getElementById('totalHours').textContent = totalHours.toFixed(1) + 'h';
-            document.getElementById('avgHours').textContent = avgHours.toFixed(1) + 'h';
-            document.getElementById('activeEngineers').textContent = activeEngineers;
-        }
-
-        // 차트 업데이트
-        function updateCharts() {
-            updateSpecificChart(currentChartTab);
-        }
-
-        // 특정 차트 업데이트
-        function updateSpecificChart(chartType) {
-            switch(chartType) {
-                case 'monthly': updateMonthlyChart(); break;
-                case 'engineer': updateEngineerChart(); break;
-                case 'supporttype': updateSupportTypeChart(); break;
-                case 'site': updateSiteChart(); break;
-            }
-        }
-
-        // 월간 차트 업데이트
-        function updateMonthlyChart() {
-            const ctx = document.getElementById('monthlyChart').getContext('2d');
-            
-            if (charts.monthly) charts.monthly.destroy();
-
-            const monthlyData = {};
-            filteredRecords.forEach(record => {
-                const month = record.startDate.slice(0, 7);
-                if (!monthlyData[month]) monthlyData[month] = {};
-                if (!monthlyData[month][record.siteName]) monthlyData[month][record.siteName] = 0;
-                monthlyData[month][record.siteName] += parseFloat(record.totalHours);
-            });
-
-            const months = Object.keys(monthlyData).sort();
-            const sites = [...new Set(filteredRecords.map(r => r.siteName))];
-            
-            const datasets = sites.map((site, index) => ({
-                label: site,
-                data: months.map(month => monthlyData[month][site] || 0),
-                backgroundColor: `hsl(${index * 60}, 70%, 60%)`,
-                borderColor: `hsl(${index * 60}, 70%, 50%)`,
-                borderWidth: 2,
-                borderRadius: 5
-            }));
-
-            charts.monthly = new Chart(ctx, {
-                type: 'bar',
-                data: { labels: months, datasets },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top' },
-                        title: { display: true, text: '월간 사이트별 지원 시간' }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, title: { display: true, text: '지원 시간 (h)' } },
-                        x: { title: { display: true, text: '월' } }
-                    }
-                }
-            });
-        }
-
-        // 엔지니어별 차트 업데이트
-        function updateEngineerChart() {
-            const ctx = document.getElementById('engineerChart').getContext('2d');
-            
-            if (charts.engineer) charts.engineer.destroy();
-
-            const engineerData = {};
-            filteredRecords.forEach(record => {
-                if (!engineerData[record.engineerName]) {
-                    engineerData[record.engineerName] = { hours: 0, count: 0 };
-                }
-                engineerData[record.engineerName].hours += parseFloat(record.totalHours);
-                engineerData[record.engineerName].count++;
-            });
-
-            const engineers = Object.keys(engineerData);
-            const totalHours = engineers.map(eng => engineerData[eng].hours.toFixed(1));
-            const avgHours = engineers.map(eng => (engineerData[eng].hours / engineerData[eng].count).toFixed(1));
-
-            charts.engineer = new Chart(ctx, {
-                type: 'bar',
-                data: {
-                    labels: engineers,
-                    datasets: [
-                        {
-                            label: '총 지원 시간',
-                            data: totalHours,
-                            backgroundColor: 'rgba(102, 126, 234, 0.8)',
-                            borderColor: 'rgba(102, 126, 234, 1)',
-                            borderWidth: 2,
-                            borderRadius: 5
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'top' },
-                        title: { display: true, text: '엔지니어별 지원 통계' }
-                    },
-                    scales: {
-                        y: { beginAtZero: true, title: { display: true, text: '시간 (h)' } }
-                    }
-                }
-            });
-        }
-
-        // 지원 타입별 차트 업데이트
-        function updateSupportTypeChart() {
-            const ctx = document.getElementById('supportTypeChart').getContext('2d');
-            
-            if (charts.supporttype) charts.supporttype.destroy();
-
-            const typeData = {};
-            filteredRecords.forEach(record => {
-                if (!typeData[record.supportType]) typeData[record.supportType] = 0;
-                typeData[record.supportType] += parseFloat(record.totalHours);
-            });
-
-            const types = Object.keys(typeData);
-            const hours = Object.values(typeData);
-            const colors = ['#28a745', '#007bff', '#dc3545'];
-
-            charts.supporttype = new Chart(ctx, {
-                type: 'doughnut',
-                data: {
-                    labels: types,
-                    datasets: [{
-                        data: hours,
-                        backgroundColor: colors,
-                        borderWidth: 3,
-                        borderColor: '#fff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right' },
-                        title: { display: true, text: '지원 타입별 시간 분포' },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                    return `${context.label}: ${context.parsed.toFixed(1)}h (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        // 사이트별 차트 업데이트
-        function updateSiteChart() {
-            const ctx = document.getElementById('siteChart').getContext('2d');
-            
-            if (charts.site) charts.site.destroy();
-
-            const siteData = {};
-            filteredRecords.forEach(record => {
-                if (!siteData[record.siteName]) siteData[record.siteName] = 0;
-                siteData[record.siteName] += parseFloat(record.totalHours);
-            });
-
-            const sites = Object.keys(siteData);
-            const hours = Object.values(siteData);
-            const colors = sites.map((_, index) => `hsl(${index * 60}, 70%, 60%)`);
-
-            charts.site = new Chart(ctx, {
-                type: 'pie',
-                data: {
-                    labels: sites,
-                    datasets: [{
-                        data: hours,
-                        backgroundColor: colors,
-                        borderWidth: 3,
-                        borderColor: '#fff'
-                    }]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    plugins: {
-                        legend: { position: 'right' },
-                        title: { display: true, text: '사이트별 총 지원 시간 분포' },
-                        tooltip: {
-                            callbacks: {
-                                label: function(context) {
-                                    const total = context.dataset.data.reduce((a, b) => a + b, 0);
-                                    const percentage = ((context.parsed / total) * 100).toFixed(1);
-                                    return `${context.label}: ${context.parsed.toFixed(1)}h (${percentage}%)`;
-                                }
-                            }
-                        }
-                    }
-                }
-            });
-        }
-
-        // 상세 통계 업데이트
-        function updateDetailStats() {
-            switch(currentStatsTab) {
-                case 'engineer': updateEngineerStats(); break;
-                case 'site': updateSiteStats(); break;
-                case 'supporttype': updateSupportTypeStats(); break;
-            }
-        }
-
-        // 엔지니어별 상세 통계
-        function updateEngineerStats() {
-            const tbody = document.getElementById('engineerStatsBody');
-            const records = filteredRecords;
-
-            if (records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #6c757d;">데이터가 없습니다.</td></tr>';
-                return;
-            }
-
-            const engineerStats = {};
-            records.forEach(record => {
-                const engineer = record.engineerName;
-                if (!engineerStats[engineer]) {
-                    engineerStats[engineer] = {
-                        count: 0, totalHours: 0, 정기점검: 0, 기술지원: 0, 장애지원: 0
-                    };
-                }
-                engineerStats[engineer].count++;
-                engineerStats[engineer].totalHours += parseFloat(record.totalHours);
-                engineerStats[engineer][record.supportType]++;
-            });
-
-            tbody.innerHTML = Object.keys(engineerStats).map(engineer => {
-                const stat = engineerStats[engineer];
-                const avgHours = stat.totalHours / stat.count;
-                return `
-                    <tr>
-                        <td style="font-weight: 600; color: #667eea;">${engineer}</td>
-                        <td>${stat.count}</td>
-                        <td>${stat.totalHours.toFixed(1)}h</td>
-                        <td>${avgHours.toFixed(1)}h</td>
-                        <td>${stat.정기점검}</td>
-                        <td>${stat.기술지원}</td>
-                        <td>${stat.장애지원}</td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        // 사이트별 상세 통계
-        function updateSiteStats() {
-            const tbody = document.getElementById('siteStatsBody');
-            const records = filteredRecords;
-
-            if (records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #6c757d;">데이터가 없습니다.</td></tr>';
-                return;
-            }
-
-            const siteStats = {};
-            records.forEach(record => {
-                const site = record.siteName;
-                if (!siteStats[site]) {
-                    siteStats[site] = {
-                        count: 0, totalHours: 0, engineers: new Set(), supportTypes: {}
-                    };
-                }
-                siteStats[site].count++;
-                siteStats[site].totalHours += parseFloat(record.totalHours);
-                siteStats[site].engineers.add(record.engineerName);
-                if (!siteStats[site].supportTypes[record.supportType]) {
-                    siteStats[site].supportTypes[record.supportType] = 0;
-                }
-                siteStats[site].supportTypes[record.supportType]++;
-            });
-
-            tbody.innerHTML = Object.keys(siteStats).map(site => {
-                const stat = siteStats[site];
-                const avgHours = stat.totalHours / stat.count;
-                const mainType = Object.keys(stat.supportTypes).reduce((a, b) => 
-                    stat.supportTypes[a] > stat.supportTypes[b] ? a : b);
-                return `
-                    <tr>
-                        <td style="font-weight: 600; color: #667eea;">${site}</td>
-                        <td>${stat.count}</td>
-                        <td>${stat.totalHours.toFixed(1)}h</td>
-                        <td>${avgHours.toFixed(1)}h</td>
-                        <td>${stat.engineers.size}명</td>
-                        <td><span class="support-type-badge ${mainType}">${mainType}</span></td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        // 지원 타입별 상세 통계
-        function updateSupportTypeStats() {
-            const tbody = document.getElementById('supportTypeStatsBody');
-            const records = filteredRecords;
-
-            if (records.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: #6c757d;">데이터가 없습니다.</td></tr>';
-                return;
-            }
-
-            const typeStats = {};
-            records.forEach(record => {
-                const type = record.supportType;
-                if (!typeStats[type]) {
-                    typeStats[type] = { count: 0, totalHours: 0, engineers: new Set() };
-                }
-                typeStats[type].count++;
-                typeStats[type].totalHours += parseFloat(record.totalHours);
-                typeStats[type].engineers.add(record.engineerName);
-            });
-
-            const totalRecords = records.length;
-            tbody.innerHTML = Object.keys(typeStats).map(type => {
-                const stat = typeStats[type];
-                const avgHours = stat.totalHours / stat.count;
-                const percentage = ((stat.count / totalRecords) * 100).toFixed(1);
-                return `
-                    <tr>
-                        <td><span class="support-type-badge ${type}">${type}</span></td>
-                        <td>${stat.count}</td>
-                        <td>${stat.totalHours.toFixed(1)}h</td>
-                        <td>${avgHours.toFixed(1)}h</td>
-                        <td>${stat.engineers.size}명</td>
-                        <td>${percentage}%</td>
-                    </tr>
-                `;
-            }).join('');
-        }
-
-        // 엑셀 템플릿 다운로드
-        function downloadExcelTemplate() {
-            const templateData = [
-                ['사이트명', '엔지니어명', '시작날짜', '시작시간', '종료날짜', '종료시간', '지원 타입', '설명 (선택)'],
-                ['Arctera', '[시오랩] 기술지원본부 임명열', '2025-01-07', '09:30', '2025-01-07', '17:30', '정기점검', '정기점검 회의'],
-                ['대림그룹', '[시오랩] 엔지니어팀 손용락', '2025-01-08', '08:00', '2025-01-08', '16:00', '기술지원', '클라이언트 설치 기술 지원'],
-                ['KB국민은행', '[시오랩] 엔지니어팀 엄정현', '2025-01-09', '10:00', '2025-01-09', '18:00', '장애지원', '백업 실패로 인한 장애지원']
-            ];
-
-            const ws = XLSX.utils.aoa_to_sheet(templateData);
-            const wb = XLSX.utils.book_new();
-            XLSX.utils.book_append_sheet(wb, ws, "지원기록템플릿");
-            
-            ws['!cols'] = [
-                {wch: 20}, {wch: 25}, {wch: 12}, {wch: 10}, {wch: 12}, {wch: 10}, {wch: 12}, {wch: 30}
-            ];
-            
-            XLSX.writeFile(wb, "사이트지원기록_템플릿_2025.xlsx");
-        }
-
-        // 파일 업로드 처리
-        function handleFileUpload(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            if (file.size > 10 * 1024 * 1024) {
-                alert('파일 크기가 10MB를 초과합니다.');
-                return;
-            }
-            
-            // 파일 확장자 확인 및 적절한 파싱 함수 호출
-            const fileName = file.name.toLowerCase();
-            const fileExtension = fileName.split('.').pop();
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const data = e.target.result;
-                    let parsedData;
-                    
-                    if (fileExtension === 'csv') {
-                        // CSV 파일 처리 (Outlook 형식 예상)
-                        parsedData = parseOutlookCsvData(data);
-                    } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                        // 기존 Excel 파일 처리
-                        const workbook = XLSX.read(new Uint8Array(data), {type: 'array'});
-                        const worksheet = workbook.Sheets[workbook.SheetNames[0]];
-                        const jsonData = XLSX.utils.sheet_to_json(worksheet, {header: 1});
-                        parsedData = parseGenericExcelData(jsonData);
-                    } else {
-                        alert('지원하지 않는 파일 형식입니다. .xlsx, .xls, .csv 파일만 지원합니다.');
-                        return;
-                    }
-
-                    if (parsedData.length === 0) {
-                        alert('유효한 데이터가 없습니다. 파일 형식이 올바른지 확인해주세요.');
-                        return;
-                    }
-                    
-                    displayPreview(parsedData);
-
-                } catch (error) {
-                    alert('파일을 읽는 중 오류가 발생했습니다: ' + error.message);
-                }
-            };
-            
-            if (fileExtension === 'csv') {
-                // CSV는 텍스트로 읽음
-                reader.readAsText(file);
-            } else if (fileExtension === 'xlsx' || fileExtension === 'xls') {
-                // Excel은 ArrayBuffer로 읽음
-                reader.readAsArrayBuffer(file);
-            }
-        }
-        
-        // CSV 데이터 파싱 (Outlook 형식)
-        function parseOutlookCsvData(csvString) {
-            // CSV 파싱 라이브러리 없이 간단한 파싱 (쉼표로 분리)
-            const rows = csvString.trim().split('\n');
-            if (rows.length < 2) return [];
-
-            const headers = rows[0].trim().split(',').map(h => h.replace(/"/g, '').trim());
-            const dataRows = rows.slice(1);
-
-            // 필요한 열 인덱스 찾기
-            const indices = {
-                title: headers.indexOf('제목'),
-                organizer: headers.indexOf('모임 이끌이'),
-                startDate: headers.indexOf('시작 날짜'),
-                startTime: headers.indexOf('시작 시간'),
-                endDate: headers.indexOf('끝 날짜'),
-                endTime: headers.indexOf('끝 시간'),
-                description: headers.indexOf('설명')
-            };
-
-            const requiredIndices = ['title', 'organizer', 'startDate', 'startTime', 'endDate', 'endTime'];
-            if (requiredIndices.some(key => indices[key] === -1)) {
-                 alert("CSV 파일에서 '제목', '모임 이끌이', '시작 날짜', '시작 시간', '끝 날짜', '끝 시간' 열을 찾을 수 없습니다. Outlook 일정 CSV 형식이 맞는지 확인해주세요.");
-                 return [];
-            }
-
-
-            const validData = [];
-            dataRows.forEach(row => {
-                // 따옴표와 쉼표 처리가 복잡하므로 간단히 쉼표로 분리 (정확도를 위해선 파서 필요)
-                // 현재 CSV는 각 필드가 큰따옴표로 묶여있고, 필드 내 줄바꿈이 있어 정규식으로 처리
-                // rows.slice(1)의 데이터만 사용.
-                
-                // 정규식을 사용하여 큰따옴표로 묶인 필드와 그렇지 않은 필드를 분리
-                const fields = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || row.split(',');
-                if (fields.length < headers.length) {
-                    // 필드 수가 부족하면 건너뜀 (취소된 일정 등)
-                    if(row.includes('취소됨')) return; 
-                }
-                
-                // 필드에서 큰따옴표 제거 및 앞뒤 공백 제거
-                const cleanFields = fields.map(field => field.replace(/^"|"$/g, '').trim());
-
-
-                const siteName = cleanFields[indices.title];
-                let engineerName = cleanFields[indices.organizer];
-                const startDate = cleanFields[indices.startDate];
-                const startTimeRaw = cleanFields[indices.startTime];
-                const endDate = cleanFields[indices.endDate];
-                const endTimeRaw = cleanFields[indices.endTime];
-                const description = cleanFields[indices.description];
-
-                // 엔지니어 이름에서 조직 정보 제거 (예: [시오랩] SC팀 김준규 -> 김준규)
-                if(engineerName) {
-                    engineerName = engineerName.replace(/\[[^\]]+\]\s*/g, '').trim();
-                } else {
-                    engineerName = "미정";
-                }
-
-                // 시간 문자열 정리 (예: "오전 9:00:00" -> "09:00")
-                const formatTime = (timeStr) => {
-                    if (!timeStr) return '';
-                    // '오전' 또는 '오후' 및 초 제거. 정규식으로 처리.
-                    let time = timeStr.replace(/.*?(\d+:\d+)(:\d+)?$/, '$1').trim();
-                    if(time.length === 4) time = '0' + time; // '9:00' -> '09:00'
-                    return time;
-                };
-
-                const startTime = formatTime(startTimeRaw);
-                const endTime = formatTime(endTimeRaw);
-                
-                const supportType = classifySupportType(siteName + ' ' + description);
-                const totalHours = calculateSupportHours(startDate, startTime, endDate, endTime);
-
-                // 유효성 검사 (총 시간이 0이 아니고 필수 필드가 존재하는 경우)
-                if (siteName && engineerName && startDate && endDate && totalHours > 0) {
-                     validData.push({
-                        siteName: siteName.replace(/^취소됨: /g, '').trim(), // 제목에 취소됨이 있다면 제거
-                        engineerName: engineerName,
-                        supportType: supportType,
-                        startDate,
-                        startTime,
-                        endDate,
-                        endTime,
-                        totalHours: totalHours.toFixed(1)
-                    });
-                }
-            });
-
-            return validData;
-        }
-
-        // 일반 엑셀 데이터 파싱 (기존 템플릿 형식)
-        function parseGenericExcelData(jsonData) {
-            if (jsonData.length < 2) return [];
-
-            const headers = jsonData[0];
-            const dataRows = jsonData.slice(1);
-            
-            const validData = [];
-            dataRows.forEach(row => {
-                if (row.length >= 7 && row[0] && row[1] && row[6]) {
-                    const startDate = formatDateFromExcel(row[2]);
-                    const startTime = formatTimeFromExcel(row[3]);
-                    const endDate = formatDateFromExcel(row[4]);
-                    const endTime = formatTimeFromExcel(row[5]);
-                    
-                    if (startDate && startTime && endDate && endTime) {
-                        const totalHours = calculateSupportHours(startDate, startTime, endDate, endTime);
-                        if(totalHours > 0) {
-                            validData.push({
-                                siteName: row[0].toString().trim(),
-                                engineerName: row[1].toString().trim(),
-                                supportType: row[6].toString().trim(),
-                                startDate,
-                                startTime,
-                                endDate,
-                                endTime,
-                                totalHours: totalHours.toFixed(1)
-                            });
-                        }
-                    }
-                }
-            });
-
-            return validData;
-        }
-
-        // 엑셀 날짜 형식 변환
-        function formatDateFromExcel(value) {
-            if (!value) return '';
-            
-            if (typeof value === 'number') {
-                const date = XLSX.SSF.parse_date_code(value);
-                return `${date.y}-${String(date.m).padStart(2, '0')}-${String(date.d).padStart(2, '0')}`;
-            }
-            
-            const dateStr = value.toString().trim();
-            if (dateStr.includes('T')) {
-                return dateStr.split('T')[0];
-            }
-            // YYYY-MM-DD 형식이 이미 갖춰진 경우
-            if (/^\d{4}-\d{1,2}-\d{1,2}$/.test(dateStr)) {
-                return dateStr;
-            }
-            
-            return dateStr;
-        }
-
-        // 엑셀 시간 형식 변환
-        function formatTimeFromExcel(value) {
-            if (!value) return '';
-            
-            if (typeof value === 'number') {
-                const totalMinutes = Math.round(value * 24 * 60);
-                const hours = Math.floor(totalMinutes / 60);
-                const minutes = totalMinutes % 60;
-                return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
-            }
-            
-            const timeStr = value.toString().trim();
-            if (timeStr.includes('T')) {
-                return timeStr.split('T')[1].substring(0, 5);
-            }
-            // HH:MM 형식이 이미 갖춰진 경우
-            if (/^\d{1,2}:\d{1,2}(:\d{2})?$/.test(timeStr)) {
-                return timeStr.substring(0, 5);
-            }
-            
-            return timeStr;
-        }
-
-        // 미리보기 표시
-        function displayPreview(data) {
-            const previewSection = document.getElementById('previewSection');
-            const previewTable = document.getElementById('previewTable');
-            
-            let tableHTML = `
-                <div style="max-height: 400px; overflow: auto; border: 1px solid #e5e7eb; border-radius: 10px;">
-                    <table style="width: 100%; border-collapse: collapse;">
-                        <thead>
-                            <tr style="background: linear-gradient(135deg, #667eea, #764ba2); color: white;">
-                                <th style="padding: 12px;">사이트명</th>
-                                <th style="padding: 12px;">엔지니어명</th>
-                                <th style="padding: 12px;">지원 타입</th>
-                                <th style="padding: 12px;">시작일시</th>
-                                <th style="padding: 12px;">종료일시</th>
-                                <th style="padding: 12px;">총 시간</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-            `;
-
-            data.forEach((record, index) => {
-                tableHTML += `
-                    <tr style="border-bottom: 1px solid #e5e7eb; ${index % 2 === 0 ? 'background: #f9fafb;' : ''}">
-                        <td style="padding: 10px;">${record.siteName}</td>
-                        <td style="padding: 10px;">${record.engineerName}</td>
-                        <td style="padding: 10px;"><span class="support-type-badge ${record.supportType}">${record.supportType}</span></td>
-                        <td style="padding: 10px;">${record.startDate} ${record.startTime}</td>
-                        <td style="padding: 10px;">${record.endDate} ${record.endTime}</td>
-                        <td style="padding: 10px;">${record.totalHours}h</td>
-                    </tr>
-                `;
-            });
-
-            tableHTML += '</tbody></table></div>';
-            previewTable.innerHTML = tableHTML;
-            previewSection.classList.remove('hidden');
-            
-            window.previewData = data;
-        }
-
-        // 엑셀 데이터 처리
-        function processExcelData() {
-            if (!window.previewData || window.previewData.length === 0) {
-                alert('처리할 데이터가 없습니다.');
-                return;
-            }
-
-            if (!confirm(`총 ${window.previewData.length}개의 기록을 등록하시겠습니까? (취소된 일정 제외)`)) {
-                return;
-            }
-
-            window.previewData.forEach(record => {
-                supportRecords.push({
-                    id: Date.now() + Math.random(),
-                    ...record,
-                    createdAt: new Date().toISOString()
-                });
-            });
-            saveRecordsToLocalStorage();
-
-            alert(`${window.previewData.length}개의 기록이 성공적으로 등록되었습니다.`);
-            clearExcelData();
-            showPage('list');
-        }
-
-        // 엑셀 데이터 초기화
-        function clearExcelData() {
-            document.getElementById('excelFileInput').value = '';
-            document.getElementById('previewSection').classList.add('hidden');
-            window.previewData = null;
-        }
-
-        // JSON 데이터 저장
-        function saveDataToJSON() {
-            if (supportRecords.length === 0) {
-                showDataStatus('저장할 데이터가 없습니다.', 'info');
-                return;
-            }
-
-            const dataToSave = {
-                version: '2.0',
-                exportDate: new Date().toISOString(),
-                exportedBy: currentUser ? currentUser.name : 'Unknown',
-                totalRecords: supportRecords.length,
-                data: supportRecords
-            };
-
-            const blob = new Blob([JSON.stringify(dataToSave, null, 2)], { type: 'application/json' });
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `site_support_data_${new Date().toISOString().slice(0, 10)}.json`;
-            a.click();
-            URL.revokeObjectURL(url);
-
-            showDataStatus(`✅ 총 ${supportRecords.length}개 기록이 JSON 파일로 저장되었습니다.`, 'success');
-        }
-
-        // JSON 데이터 불러오기
-        function loadDataFromJSON(event) {
-            const file = event.target.files[0];
-            if (!file) return;
-
-            const reader = new FileReader();
-            reader.onload = function(e) {
-                try {
-                    const jsonData = JSON.parse(e.target.result);
-                    
-                    if (!jsonData.data || !Array.isArray(jsonData.data)) {
-                        throw new Error('올바르지 않은 JSON 파일 구조입니다.');
-                    }
-
-                    if (!confirm(`현재 데이터: ${supportRecords.length}개\n불러올 데이터: ${jsonData.data.length}개\n\n기존 데이터를 모두 대체하시겠습니까?`)) {
-                        return;
-                    }
-
-                    supportRecords = jsonData.data;
-                    filteredRecords = supportRecords.slice();
-
-                    updateFilterOptions();
-                    applyFilters();
-                    updateRecordsList();
-
-                    showDataStatus(`✅ ${supportRecords.length}개의 기록이 성공적으로 불러와졌습니다.`, 'success');
-
-                    if (currentPage !== 'dashboard') {
-                        showPage('dashboard');
-                    }
-
-                } catch (error) {
-                    showDataStatus('❌ JSON 파일 로드 중 오류가 발생했습니다.', 'error');
-                }
-            };
-
-            reader.readAsText(file);
-            event.target.value = '';
-        }
-
-        // 데이터 상태 메시지 표시
-        function showDataStatus(message, type) {
-            const statusElement = document.getElementById('dataStatus');
-            statusElement.textContent = message;
-            statusElement.className = `data-status ${type}`;
-            statusElement.classList.remove('hidden');
-
-            setTimeout(() => {
-                statusElement.classList.add('hidden');
-            }, 5000);
-        }
-
-        // 이벤트 리스너 등록
-        document.addEventListener('DOMContentLoaded', function() {
-            // 엔터키 로그인
-            ['username', 'password'].forEach(id => {
-                document.getElementById(id).addEventListener('keypress', function(e) {
-                    if (e.key === 'Enter') handleLogin();
-                });
-            });
-
-            // 실시간 시간 계산
-            ['startDate', 'startTime', 'endDate', 'endTime'].forEach(id => {
-                document.getElementById(id).addEventListener('change', updateCalculatedHours);
-            });
-
-            // 검색 실시간 적용
-            document.getElementById('searchKeyword').addEventListener('input', function() {
-                clearTimeout(this.searchTimeout);
-                this.searchTimeout = setTimeout(() => applyFilters(), 300);
-            });
-            // **[수정 시작]** 1. 로컬 저장소에서 데이터 불러오기
-            loadRecordsFromLocalStorage(); 
-            // **[수정 종료]**
-
-            // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
-            setTimeout(() => {
-                if (supportRecords.length === 0) {
-                    generateSampleData();
-                }
-            }, 1000);
-        });
-
-        // **[새로운 함수]** 로컬 저장소에서 데이터를 불러오는 함수
-        function loadRecordsFromLocalStorage() {
-              const savedData = localStorage.getItem('supportRecords');
-              if (savedData) {
-                  try {
-                        supportRecords = JSON.parse(savedData);
-                        // 숫자 형식으로 변환이 필요한 경우 다시 변환
-                        supportRecords.forEach(r => {
-                            r.totalHours = parseFloat(r.totalHours);
-                            // ID가 문자열일 경우를 대비해 숫자로 다시 변환
-                            r.id = parseInt(r.id); 
-                      });
-                      filteredRecords = supportRecords.slice();
-                      console.log(`✅ ${supportRecords.length}개의 기록을 로컬 저장소에서 불러왔습니다.`);
-                } catch (e) {
-                    console.error("로컬 저장소 데이터를 파싱하는 중 오류 발생:", e);
-                }
-            }
-        }
-
-        // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
-        function generateSampleData() {
-            const sampleRecords = [
-                { id: 1, siteName: 'Arctera', engineerName: '임명열', supportType: '기술지원', startDate: '2025-01-07', startTime: '09:30', endDate: '2025-01-07', endTime: '17:30', totalHours: '8.0', createdAt: '2025-01-07T09:30:00.000Z' },
-                { id: 2, siteName: '대림그룹', engineerName: '임명열', supportType: '기술지원', startDate: '2025-01-06', startTime: '09:30', endDate: '2025-01-06', endTime: '14:30', totalHours: '5.0', createdAt: '2025-01-06T09:30:00.000Z' },
-                { id: 3, siteName: '인재INC', engineerName: '임명열', supportType: '기술지원', startDate: '2025-01-09', startTime: '10:00', endDate: '2025-01-10', endTime: '12:00', totalHours: '26.0', createdAt: '2025-01-09T09:30:00.000Z' },
-                { id: 4, siteName: '케이뱅크', engineerName: '임명열', supportType: '기술지원', startDate: '2025-01-06', startTime: '12:00', endDate: '2025-01-07', endTime: '12:00', totalHours: '24.0', createdAt: '2025-01-06T07:30:00.000Z' },
-                { id: 5, siteName: '대림그룹', engineerName: '손용락', supportType: '기술지원', startDate: '2025-01-07', startTime: '10:00', endDate: '2025-01-07', endTime: '13:30', totalHours: '3.5', createdAt: '2025-01-06T09:30:00.000Z' },
-                { id: 6, siteName: 'KB국민은행', engineerName: '엄정현', supportType: '기술지원', startDate: '2025-01-07', startTime: '10:00', endDate: '2025-01-07', endTime: '17:30', totalHours: '7.5', createdAt: '2025-01-06T09:30:00.000Z' },
-                { id: 7, siteName: '대림그룹', engineerName: '이경진', supportType: '기술지원', startDate: '2025-01-06', startTime: '15:30', endDate: '2025-01-06', endTime: '16:30', totalHours: '1.0', createdAt: '2025-01-05T15:02:00.000Z' },
-                { id: 8, siteName: 'KT 국제전화트래픽분석시스템', engineerName: '엄정현', supportType: '기술지원', startDate: '2025-01-06', startTime: '14:00', endDate: '2025-01-06', endTime: '16:30', totalHours: '2.5', createdAt: '2025-01-05T13:32:00.000Z' },
-                { id: 9, siteName: '서울신용보증재단', engineerName: '손용락', supportType: '정기점검', startDate: '2025-01-07', startTime: '14:00', endDate: '2025-01-07', endTime: '15:00', totalHours: '1.0', createdAt: '2025-01-06T13:32:00.000Z' },
-                { id: 10, siteName: 'KT Biz솔루션플랫폼운용팀', engineerName: '엄정현', supportType: '정기점검', startDate: '2025-01-08', startTime: '10:00', endDate: '2025-01-08', endTime: '11:00', totalHours: '1.0', createdAt: '2025-01-07T09:30:00.000Z' },
-                { id: 11, siteName: 'GTX-A 민자구간', engineerName: '손용락', supportType: '기술지원', startDate: '2025-01-09', startTime: '09:00', endDate: '2025-01-09', endTime: '14:00', totalHours: '5.0', createdAt: '2025-01-08T08:30:00.000Z' },
-                { id: 12, siteName: '롯데카드', engineerName: '김준규', supportType: '장애지원', startDate: '2025-01-10', startTime: '14:30', endDate: '2025-01-10', endTime: '17:30', totalHours: '3.0', createdAt: '2025-01-14T13:32:00.000Z' },
-                { id: 13, siteName: 'KT Tving', engineerName: '엄정현', supportType: '정기점검', startDate: '2025-01-09', startTime: '14:00', endDate: '2025-01-09', endTime: '15:30', totalHours: '1.5', createdAt: '2025-01-08T13:32:00.000Z' },
-                { id: 14, siteName: 'KT CLOUD IPC', engineerName: '엄정현', supportType: '정기점검', startDate: '2025-01-08', startTime: '14:00', endDate: '2025-01-08', endTime: '17:30', totalHours: '3.5', createdAt: '2025-01-07T13:32:00.000Z' },
-                { id: 15, siteName: 'Arctera', engineerName: '미정', supportType: '기술지원', startDate: '2025-01-20', startTime: '14:00', endDate: '2025-01-20', endTime: '23:30', totalHours: '9.5', createdAt: '2025-01-19T13:32:00.000Z' }
-            ];
-            
-            supportRecords = sampleRecords;
-            filteredRecords = supportRecords.slice();
-            
-            if (currentPage === 'dashboard') {
-                updateFilterOptions();
-                applyFilters();
-            }
-            updateRecordsList();
-        }
-    </script><script>
+        // 전역 변수<script>
         'use strict';
         
         // 전역 변수
@@ -2125,15 +957,20 @@
         let currentStatsTab = 'engineer';
         let currentRegisterTab = 'manual';
 
+        // 💡 [필수 수정] GitHub에 업로드된 CSV 파일의 Raw URL을 여기에 지정하세요.
+        // 예: 'https://raw.githubusercontent.com/JG-KIM1/Engineer/main/calender.CSV'
+        const GITHUB_CSV_URL = 'https://raw.githubusercontent.com/JG-KIM1/Engineer/main/calender.CSV'; 
+
         // 사용자 데이터
         const users = [
             { username: 'admin', password: 'admin123', name: '관리자' },
             { username: 'engineer1', password: 'eng123', name: '엔지니어1' }
         ];
 
-        // 지원 타입 자동 분류 로직
+        // **[수정된 함수]** 지원 타입 자동 분류 로직
         function classifySupportType(description) {
-            if (!description) return '기술지원'; // 설명이 없는 경우 기본값
+            // 설명이 없는 경우는 기본적으로 기술지원으로 분류 유지
+            if (!description) return '기술지원'; 
 
             const lowerDesc = description.toLowerCase();
 
@@ -2145,12 +982,13 @@
             if (lowerDesc.includes('장애') || lowerDesc.includes('실패') || lowerDesc.includes('fault') || lowerDesc.includes('down')) {
                 return '장애지원';
             }
-            // 3. 기술지원 키워드 (남은 대부분의 경우)
+            // 3. 기술지원 키워드
             if (lowerDesc.includes('기술지원') || lowerDesc.includes('기술미팅') || lowerDesc.includes('설치') || lowerDesc.includes('구성') || lowerDesc.includes('테스트') || lowerDesc.includes('review') || lowerDesc.includes('poc')) {
                 return '기술지원';
             }
             
-            return '기술지원'; // 위의 조건에 모두 해당하지 않으면 기술지원으로 분류
+            // **[변경 사항]** 위의 모든 조건에 해당하지 않으면 null을 반환하여 삭제 처리
+            return null; 
         }
         
         // 로그인 처리
@@ -2330,17 +1168,16 @@
             document.getElementById('calculatedHours').textContent = hours.toFixed(1);
         }
 
-        // **[새로운 함수]** 현재 기록을 로컬 저장소에 저장하는 함수
-            function saveRecordsToLocalStorage() {
-                try {
-                    localStorage.setItem('supportRecords', JSON.stringify(supportRecords));
-                    // console.log(`✅ ${supportRecords.length}개의 기록을 로컬 저장소에 저장했습니다.`);
-                } catch (e) {
-                    console.error("로컬 저장소에 데이터를 저장하는 중 오류 발생:", e);
-                    alert("데이터 저장에 실패했습니다. 브라우저 저장 공간이 가득 찼거나 개인 정보 보호 설정 때문일 수 있습니다.");
-                }
+        // 현재 기록을 로컬 저장소에 저장하는 함수
+        function saveRecordsToLocalStorage() {
+            try {
+                localStorage.setItem('supportRecords', JSON.stringify(supportRecords));
+            } catch (e) {
+                console.error("로컬 저장소에 데이터를 저장하는 중 오류 발생:", e);
+                // alert("데이터 저장에 실패했습니다. 브라우저 저장 공간이 가득 찼거나 개인 정보 보호 설정 때문일 수 있습니다.");
             }
-
+        }
+        
         // 지원 기록 제출
         function handleSubmitSupport() {
             const siteName = document.getElementById('siteName').value;
@@ -2377,8 +1214,10 @@
             } else {
                 supportRecords.push(record);
             }
-            saveRecordsToLocalStorage();
-            
+
+            // 변경된 데이터를 로컬 저장소에 반영
+            saveRecordsToLocalStorage(); 
+
             clearForm();
             alert(editingRecord ? '기록이 수정되었습니다.' : '기록이 등록되었습니다.');
             showPage('list');
@@ -2425,7 +1264,10 @@
         function deleteRecord(id) {
             if (confirm('정말로 이 기록을 삭제하시겠습니까?')) {
                 supportRecords = supportRecords.filter(r => r.id !== id);
-                saveRecordsToLocalStorage();
+                
+                // 변경된 데이터를 로컬 저장소에 반영
+                saveRecordsToLocalStorage(); 
+
                 updateRecordsList();
                 if (currentPage === 'dashboard') {
                     applyFilters();
@@ -2892,12 +1734,13 @@
             }
         }
         
-        // CSV 데이터 파싱 (Outlook 형식)
+        // CSV 데이터 파싱 (Outlook 형식) - Raw URL 로드 및 파일 업로드 모두 사용
         function parseOutlookCsvData(csvString) {
             // CSV 파싱 라이브러리 없이 간단한 파싱 (쉼표로 분리)
             const rows = csvString.trim().split('\n');
             if (rows.length < 2) return [];
 
+            // 헤더 분석 (큰따옴표 제거)
             const headers = rows[0].trim().split(',').map(h => h.replace(/"/g, '').trim());
             const dataRows = rows.slice(1);
 
@@ -2914,21 +1757,19 @@
 
             const requiredIndices = ['title', 'organizer', 'startDate', 'startTime', 'endDate', 'endTime'];
             if (requiredIndices.some(key => indices[key] === -1)) {
-                 alert("CSV 파일에서 '제목', '모임 이끌이', '시작 날짜', '시작 시간', '끝 날짜', '끝 시간' 열을 찾을 수 없습니다. Outlook 일정 CSV 형식이 맞는지 확인해주세요.");
+                 // 이 경고는 파일 업로드 시에만 사용자에게 표시됨
+                 console.error("CSV 파일에서 필수 헤더를 찾을 수 없습니다.");
                  return [];
             }
 
 
             const validData = [];
             dataRows.forEach(row => {
-                // 따옴표와 쉼표 처리가 복잡하므로 간단히 쉼표로 분리 (정확도를 위해선 파서 필요)
-                // 현재 CSV는 각 필드가 큰따옴표로 묶여있고, 필드 내 줄바꿈이 있어 정규식으로 처리
-                // rows.slice(1)의 데이터만 사용.
-                
                 // 정규식을 사용하여 큰따옴표로 묶인 필드와 그렇지 않은 필드를 분리
                 const fields = row.match(/(".*?"|[^",\s]+)(?=\s*,|\s*$)/g) || row.split(',');
+                
                 if (fields.length < headers.length) {
-                    // 필드 수가 부족하면 건너뜀 (취소된 일정 등)
+                    // 필드 수가 부족하면 건너뛰거나 취소된 일정 필터링
                     if(row.includes('취소됨')) return; 
                 }
                 
@@ -2957,7 +1798,8 @@
                     // '오전' 또는 '오후' 및 초 제거. 정규식으로 처리.
                     let time = timeStr.replace(/.*?(\d+:\d+)(:\d+)?$/, '$1').trim();
                     if(time.length === 4) time = '0' + time; // '9:00' -> '09:00'
-                    return time;
+                    // Outlook 시간 문자열에서 ' 오후'와 같은 공백이 포함된 경우 처리
+                    return time.replace(/ /g, '');
                 };
 
                 const startTime = formatTime(startTimeRaw);
@@ -2966,8 +1808,8 @@
                 const supportType = classifySupportType(siteName + ' ' + description);
                 const totalHours = calculateSupportHours(startDate, startTime, endDate, endTime);
 
-                // 유효성 검사 (총 시간이 0이 아니고 필수 필드가 존재하는 경우)
-                if (siteName && engineerName && startDate && endDate && totalHours > 0) {
+                // **[최종 수정된 부분]**: supportType이 null이 아니고, 총 시간이 0보다 큰 경우에만 추가
+                if (siteName && engineerName && startDate && endDate && totalHours > 0 && supportType) {
                      validData.push({
                         siteName: siteName.replace(/^취소됨: /g, '').trim(), // 제목에 취소됨이 있다면 제거
                         engineerName: engineerName,
@@ -3124,6 +1966,9 @@
                 });
             });
 
+            // 변경된 데이터를 로컬 저장소에 반영
+            saveRecordsToLocalStorage(); 
+
             alert(`${window.previewData.length}개의 기록이 성공적으로 등록되었습니다.`);
             clearExcelData();
             showPage('list');
@@ -3136,7 +1981,7 @@
             window.previewData = null;
         }
 
-        // JSON 데이터 저장
+        // JSON 데이터 저장 (기능 유지)
         function saveDataToJSON() {
             if (supportRecords.length === 0) {
                 showDataStatus('저장할 데이터가 없습니다.', 'info');
@@ -3159,10 +2004,10 @@
             a.click();
             URL.revokeObjectURL(url);
 
-            showDataStatus(`✅ 총 ${supportRecords.length}개 기록이 JSON 파일로 저장되었습니다.`, 'success');
+            showDataStatus(`✅ 총 ${supportRecords.length}개 기록이 JSON 파일로 저장되었습니다. (GitHub에 백업하여 자동 로드 가능)`, 'success');
         }
 
-        // JSON 데이터 불러오기
+        // JSON 데이터 불러오기 (기능 유지)
         function loadDataFromJSON(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -3183,6 +2028,9 @@
                     supportRecords = jsonData.data;
                     filteredRecords = supportRecords.slice();
 
+                    // 로컬 저장소에 저장하여 데이터 유지
+                    saveRecordsToLocalStorage();
+                    
                     updateFilterOptions();
                     applyFilters();
                     updateRecordsList();
@@ -3214,6 +2062,79 @@
             }, 5000);
         }
 
+        // 로컬 저장소에서 데이터를 불러오는 함수
+        function loadRecordsFromLocalStorage() {
+            const savedData = localStorage.getItem('supportRecords');
+            if (savedData) {
+                try {
+                    supportRecords = JSON.parse(savedData);
+                    supportRecords.forEach(r => {
+                        // totalHours를 문자열이 아닌 숫자로 변환 (분석의 정확도를 위해)
+                        r.totalHours = parseFloat(r.totalHours);
+                        r.id = parseInt(r.id); 
+                    });
+                    filteredRecords = supportRecords.slice();
+                    console.log(`✅ ${supportRecords.length}개의 기록을 로컬 저장소에서 불러왔습니다.`);
+                    return true;
+                } catch (e) {
+                    console.error("로컬 저장소 데이터를 파싱하는 중 오류 발생:", e);
+                    localStorage.removeItem('supportRecords'); // 오류 시 데이터 제거
+                    return false;
+                }
+            }
+            return false;
+        }
+
+        // GitHub CSV 자동 로드 함수
+        function loadRecordsFromGitHub() {
+            if (GITHUB_CSV_URL.includes('YOUR_GITHUB_RAW_CSV_URL_HERE')) {
+                console.warn("GitHub CSV URL이 설정되지 않았습니다. 샘플 데이터를 로드합니다.");
+                generateSampleData();
+                return;
+            }
+            
+            fetch(GITHUB_CSV_URL)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error(`HTTP Error! Status: ${response.status}. CSV 로드 실패.`);
+                    }
+                    return response.text(); // CSV 파일을 텍스트로 가져옴
+                })
+                .then(csvText => {
+                    // Outlook CSV 파싱 로직을 사용하여 텍스트 데이터를 처리
+                    const parsedData = parseOutlookCsvData(csvText);
+
+                    if (parsedData.length > 0) {
+                        // 기존 로컬 데이터를 덮어쓰고, CSV의 데이터를 추가합니다.
+                        // (GitHub CSV 파일이 전체 데이터의 원본이라고 가정합니다.)
+                        supportRecords = parsedData.map(record => ({
+                            id: Date.now() + Math.random(),
+                            ...record,
+                            createdAt: new Date().toISOString()
+                        }));
+
+                        filteredRecords = supportRecords.slice();
+                        console.log(`✅ GitHub CSV에서 ${supportRecords.length}개의 기록을 불러왔습니다.`);
+                        
+                        // GitHub에서 불러온 최신 데이터를 로컬 저장소에 저장 (영구 저장)
+                        saveRecordsToLocalStorage(); 
+                        
+                    } else {
+                        throw new Error('CSV 파일에 유효한 기록이 없습니다.');
+                    }
+                })
+                .catch(error => {
+                    console.error("❌ GitHub CSV 파일 로드 및 파싱 실패:", error);
+                    // 로드/파싱 실패 시 샘플 데이터로 대체
+                    generateSampleData();
+                })
+                .finally(() => {
+                    updateFilterOptions();
+                    applyFilters();
+                    updateRecordsList();
+                });
+        }
+
         // 이벤트 리스너 등록
         document.addEventListener('DOMContentLoaded', function() {
             // 엔터키 로그인
@@ -3234,15 +2155,21 @@
                 this.searchTimeout = setTimeout(() => applyFilters(), 300);
             });
 
-            // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
-            setTimeout(() => {
-                if (supportRecords.length === 0) {
-                    generateSampleData();
-                }
-            }, 1000);
+            // **[데이터 로드 우선순위]**: LocalStorage > GitHub CSV URL > SampleData
+            const loadedFromLocal = loadRecordsFromLocalStorage(); 
+            
+            if (!loadedFromLocal) {
+                // 로컬에 없으면 GitHub CSV에서 로드를 시도
+                loadRecordsFromGitHub(); 
+            } else {
+                // 로컬 데이터가 있으면 바로 초기화 및 업데이트
+                updateFilterOptions();
+                applyFilters();
+                updateRecordsList();
+            }
         });
 
-        // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
+        // 샘플 데이터 생성 (CSV 자동 로드 실패 시 사용)
         function generateSampleData() {
             const sampleRecords = [
                 { id: 1, siteName: 'Arctera', engineerName: '임명열', supportType: '기술지원', startDate: '2025-01-07', startTime: '09:30', endDate: '2025-01-07', endTime: '17:30', totalHours: '8.0', createdAt: '2025-01-07T09:30:00.000Z' },
@@ -3265,11 +2192,7 @@
             supportRecords = sampleRecords;
             filteredRecords = supportRecords.slice();
             
-            if (currentPage === 'dashboard') {
-                updateFilterOptions();
-                applyFilters();
-            }
-            updateRecordsList();
+            saveRecordsToLocalStorage(); // 샘플 데이터도 로컬에 저장
         }
     </script>
 </body>
