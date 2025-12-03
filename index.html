@@ -1030,6 +1030,96 @@
             `).join('');
         }
         
+        // 페이지 전환
+        function showPage(page) {
+            ['dashboardPage', 'registerPage', 'listPage'].forEach(p => {
+                document.getElementById(p).classList.add('hidden');
+            });
+
+            document.querySelectorAll('.nav-link').forEach(link => {
+                link.classList.remove('active');
+            });
+
+            const targetElement = event && event.target ? event.target : document.querySelector(`.nav-links .nav-link[onclick*="${page}"]`);
+            if (targetElement) {
+                targetElement.classList.add('active');
+            } else {
+                document.querySelector('.nav-links .nav-link').classList.add('active');
+            }
+
+            document.getElementById(page + 'Page').classList.remove('hidden');
+            
+            currentPage = page;
+
+            if (page === 'dashboard') {
+                updateFilterOptions();
+                applyFilters();
+            } else if (page === 'list') {
+                updateRecordsList();
+            }
+        }
+
+        // 차트 탭 전환
+        function showChartTab(tabName) {
+            document.querySelectorAll('.chart-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.chart-tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            const targetElement = event && event.target ? event.target : document.querySelector(`.chart-tabs .chart-tab[onclick*="${tabName}"]`);
+            if (targetElement) {
+                targetElement.classList.add('active');
+            }
+            
+            document.getElementById(tabName + 'ChartContainer').classList.remove('hidden');
+            
+            currentChartTab = tabName;
+            updateSpecificChart(tabName);
+        }
+
+        // 통계 탭 전환
+        function showStatsTab(tabName) {
+            document.querySelectorAll('.stats-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.stats-tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            const targetElement = event && event.target ? event.target : document.querySelector(`.stats-tabs .stats-tab[onclick*="${tabName}"]`);
+            if (targetElement) {
+                targetElement.classList.add('active');
+            }
+            
+            document.getElementById(tabName + 'StatsContainer').classList.remove('hidden');
+            
+            currentStatsTab = tabName;
+            updateDetailStats();
+        }
+
+        // 등록 탭 전환
+        function showRegisterTab(tabName) {
+            document.querySelectorAll('.register-tab').forEach(tab => {
+                tab.classList.remove('active');
+            });
+            document.querySelectorAll('.register-tab-content').forEach(content => {
+                content.classList.add('hidden');
+            });
+
+            const targetElement = event && event.target ? event.target : document.querySelector(`.register-tabs .register-tab[onclick*="${tabName}"]`);
+            if (targetElement) {
+                targetElement.classList.add('active');
+            } else {
+                document.querySelector('.register-tabs .register-tab').classList.add('active');
+            }
+            
+            document.getElementById(tabName + 'RegisterContent').classList.remove('hidden');
+            
+            currentRegisterTab = tabName;
+        }
+
         // =======================================================
         // ✅ [Dedicate 분류 로직]
         // =======================================================
@@ -1049,7 +1139,7 @@
                     '설치', '구성', '테스트', 'review', 'poc', '클라이언트', '라이선스', '라이센스', 'migr', 'migration'
                 ]
             };
-            
+
             // 3. 정기점검 우선 확인
             if (keywords.정기점검.some(k => lowerText.includes(k))) {
                 return '정기점검';
@@ -1099,7 +1189,6 @@
                 document.getElementById('loginPage').classList.add('hidden');
                 document.getElementById('mainApp').classList.remove('hidden');
                 document.getElementById('userWelcome').textContent = `${user.name}님 환영합니다`;
-                // showPage는 DOMContentLoaded의 finally 블록에서 호출되거나 수동으로 호출됨
             } else {
                 localStorage.removeItem('currentUser');
                 document.getElementById('mainApp').classList.add('hidden');
@@ -1128,35 +1217,6 @@
 
         function handleLogout() {
             setLoginState(null); 
-        }
-
-        // 페이지 전환 (함수 상단으로 이동)
-        function showPage(page) {
-            ['dashboardPage', 'registerPage', 'listPage'].forEach(p => {
-                document.getElementById(p).classList.add('hidden');
-            });
-
-            document.querySelectorAll('.nav-link').forEach(link => {
-                link.classList.remove('active');
-            });
-
-            const targetElement = event && event.target ? event.target : document.querySelector(`.nav-links .nav-link[onclick*="${page}"]`);
-            if (targetElement) {
-                targetElement.classList.add('active');
-            } else {
-                document.querySelector('.nav-links .nav-link').classList.add('active');
-            }
-
-            document.getElementById(page + 'Page').classList.remove('hidden');
-            
-            currentPage = page;
-
-            if (page === 'dashboard') {
-                updateFilterOptions();
-                applyFilters();
-            } else if (page === 'list') {
-                updateRecordsList();
-            }
         }
         
         // =======================================================
@@ -1532,25 +1592,22 @@
                 engineerStats[engineer].count++;
                 engineerStats[engineer].totalHours += parseFloat(record.totalHours);
                 
-                // 새로운 분류 '기타지원' 처리 및 기존 분류 처리
                 const type = record.supportType;
 
                 if (engineerStats[engineer].hasOwnProperty(type)) {
                     engineerStats[engineer][type]++;
                 } else {
-                    // 예외적인 경우 (예: 새로운 타입이 추가된 경우)
                     engineerStats[engineer]['기타지원']++; 
                 }
             });
             
-            // 엔지니어별 통계 테이블은 정기점검, 기술지원, 장애지원 3가지 컬럼만 존재하므로,
-            // '기타지원'은 일단 '기술지원'에 합산하여 표시하도록 처리
+            // NOTE: 테이블 헤더가 정기점검, 기술지원, 장애지원 3가지이므로, '기타지원'은 '기술지원'에 합산하여 표시합니다.
             
             tbody.innerHTML = Object.keys(engineerStats).map(engineer => {
                 const stat = engineerStats[engineer];
                 const avgHours = stat.totalHours / stat.count;
                 
-                const techSupportCount = stat.기술지원 + (stat['기타지원'] || 0);
+                const techSupportCount = (stat.기술지원 || 0) + (stat['기타지원'] || 0);
 
                 return `
                     <tr>
@@ -2048,7 +2105,7 @@
         }
 
         function loadRecordsFromGitHub() {
-            if (GITHUB_CSV_URL.includes('https://raw.githubusercontent.com/JG-KIM1/Engineer/main/calender.CSV')) {
+            if (GITHUB_CSV_URL.includes('YOUR_GITHUB_RAW_CSV_URL_HERE')) {
                 console.warn("GitHub CSV URL이 설정되지 않았습니다. 샘플 데이터를 로드합니다.");
                 generateSampleData();
                 return;
@@ -2115,6 +2172,64 @@
             
             saveRecordsToLocalStorage(); 
         }
+
+        // **[새로 추가/수정]** DOMContentLoaded 이벤트 핸들러
+        document.addEventListener('DOMContentLoaded', function() {
+            // 1. 로그인 상태 복원 시도
+            const savedUser = localStorage.getItem('currentUser');
+            if (savedUser) {
+                try {
+                    const user = JSON.parse(savedUser);
+                    document.getElementById('userWelcome').textContent = `${user.name}님 환영합니다`;
+                    currentUser = user; // 전역 변수 설정
+                } catch(e) {
+                    console.error("저장된 사용자 정보 복원 실패:", e);
+                    localStorage.removeItem('currentUser');
+                }
+            }
+
+            // 2. 데이터 로드 우선순위: LocalStorage > GitHub CSV URL > Sample Data
+            const loadedFromLocal = loadRecordsFromLocalStorage(); 
+            
+            if (!loadedFromLocal) {
+                loadRecordsFromGitHub(); 
+            } else {
+                updateFilterOptions();
+                applyFilters();
+                updateRecordsList();
+            }
+
+            // 3. 페이지가 로드되고 데이터가 준비되면, 로그인 상태에 따라 최종 UI 조정
+            if (currentUser) {
+                // 로그인 상태인 경우, 대시보드로 이동
+                document.getElementById('loginPage').classList.add('hidden');
+                document.getElementById('mainApp').classList.remove('hidden');
+                document.querySelector('.nav-links .nav-link').classList.add('active');
+                document.getElementById('dashboardPage').classList.remove('hidden');
+            } else {
+                 // 로그아웃 상태인 경우, 로그인 페이지 표시
+                document.getElementById('mainApp').classList.add('hidden');
+                document.getElementById('loginPage').classList.remove('hidden');
+            }
+
+            // 엔터키 로그인
+            ['username', 'password'].forEach(id => {
+                document.getElementById(id).addEventListener('keypress', function(e) {
+                    if (e.key === 'Enter') handleLogin();
+                });
+            });
+
+            // 실시간 시간 계산
+            ['startDate', 'startTime', 'endDate', 'endTime'].forEach(id => {
+                document.getElementById(id).addEventListener('change', updateCalculatedHours);
+            });
+
+            // 검색 실시간 적용
+            document.getElementById('searchKeyword').addEventListener('input', function() {
+                clearTimeout(this.searchTimeout);
+                this.searchTimeout = setTimeout(() => applyFilters(), 300);
+            });
+        });
     </script>
 </body>
 </html>
