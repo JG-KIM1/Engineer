@@ -1939,6 +1939,7 @@
                     createdAt: new Date().toISOString()
                 });
             });
+            saveRecordsToLocalStorage();
 
             alert(`${window.previewData.length}개의 기록이 성공적으로 등록되었습니다.`);
             clearExcelData();
@@ -2049,6 +2050,9 @@
                 clearTimeout(this.searchTimeout);
                 this.searchTimeout = setTimeout(() => applyFilters(), 300);
             });
+            // **[수정 시작]** 1. 로컬 저장소에서 데이터 불러오기
+            loadRecordsFromLocalStorage(); 
+            // **[수정 종료]**
 
             // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
             setTimeout(() => {
@@ -2057,6 +2061,26 @@
                 }
             }, 1000);
         });
+
+        // **[새로운 함수]** 로컬 저장소에서 데이터를 불러오는 함수
+        function loadRecordsFromLocalStorage() {
+              const savedData = localStorage.getItem('supportRecords');
+              if (savedData) {
+                  try {
+                        supportRecords = JSON.parse(savedData);
+                        // 숫자 형식으로 변환이 필요한 경우 다시 변환
+                        supportRecords.forEach(r => {
+                            r.totalHours = parseFloat(r.totalHours);
+                            // ID가 문자열일 경우를 대비해 숫자로 다시 변환
+                            r.id = parseInt(r.id); 
+                      });
+                      filteredRecords = supportRecords.slice();
+                      console.log(`✅ ${supportRecords.length}개의 기록을 로컬 저장소에서 불러왔습니다.`);
+                } catch (e) {
+                    console.error("로컬 저장소 데이터를 파싱하는 중 오류 발생:", e);
+                }
+            }
+        }
 
         // 샘플 데이터 생성 (실제 엑셀 데이터 기반)
         function generateSampleData() {
@@ -2306,6 +2330,17 @@
             document.getElementById('calculatedHours').textContent = hours.toFixed(1);
         }
 
+        // **[새로운 함수]** 현재 기록을 로컬 저장소에 저장하는 함수
+            function saveRecordsToLocalStorage() {
+                try {
+                    localStorage.setItem('supportRecords', JSON.stringify(supportRecords));
+                    // console.log(`✅ ${supportRecords.length}개의 기록을 로컬 저장소에 저장했습니다.`);
+                } catch (e) {
+                    console.error("로컬 저장소에 데이터를 저장하는 중 오류 발생:", e);
+                    alert("데이터 저장에 실패했습니다. 브라우저 저장 공간이 가득 찼거나 개인 정보 보호 설정 때문일 수 있습니다.");
+                }
+            }
+
         // 지원 기록 제출
         function handleSubmitSupport() {
             const siteName = document.getElementById('siteName').value;
@@ -2342,7 +2377,8 @@
             } else {
                 supportRecords.push(record);
             }
-
+            saveRecordsToLocalStorage();
+            
             clearForm();
             alert(editingRecord ? '기록이 수정되었습니다.' : '기록이 등록되었습니다.');
             showPage('list');
@@ -2389,6 +2425,7 @@
         function deleteRecord(id) {
             if (confirm('정말로 이 기록을 삭제하시겠습니까?')) {
                 supportRecords = supportRecords.filter(r => r.id !== id);
+                saveRecordsToLocalStorage();
                 updateRecordsList();
                 if (currentPage === 'dashboard') {
                     applyFilters();
